@@ -51,6 +51,9 @@ fn main() {
     }
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.first().map(String::as_str), Some("inspect" | "disasm" | "shaders" | "rpf")) {
+        lower_priority_for_batch_work();
+    }
     let code = match args.first().map(String::as_str) {
         Some("run") if args.len() >= 2 => {
             let rest: Vec<String> = match args.iter().position(|a| a == "--") {
@@ -81,6 +84,20 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+/// The analysis commands (`shaders --precompile` above all) can keep every core busy for hours.
+/// At normal priority that starves the rest of the machine, including the network stack: on a
+/// host whose traffic goes through a Hyper-V virtual switch, LAN pings rose to 100 ms and a
+/// download fell from 579 to 38 Mbit/s. Below normal they only use the CPU nobody else wants.
+/// `xcl run` keeps normal priority (a game must not yield). `XCL_PRIORITY=normal` opts out.
+fn lower_priority_for_batch_work() {
+    if std::env::var("XCL_PRIORITY").is_ok_and(|v| v.eq_ignore_ascii_case("normal")) {
+        return;
+    }
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS};
+    // Failure only leaves the priority unchanged; nothing to report.
+    unsafe { SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS) };
 }
 
 /// xcl.exe opened from Explorer: the console is its own (from a terminal, the shell shares it).
